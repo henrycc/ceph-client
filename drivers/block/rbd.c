@@ -60,6 +60,7 @@
 #define RBD_MINORS_PER_MAJOR	256		/* max minors per blkdev */
 
 #define RBD_MAX_SNAP_NAME_LEN	32
+#define RBD_MAX_SNAP_COUNT	510	/* allows max snapc to fit in a page */
 #define RBD_MAX_OPT_LEN		1024
 
 #define RBD_SNAP_HEAD_NAME	"-"
@@ -2757,6 +2758,83 @@ static int __rbd_dev_v2_snapc_features(struct rbd_device *rbd_dev, u64 snap_id,
 	return 0;
 }
 
+static int rbd_dev_v2_snap_context(struct rbd_device *rbd_dev)
+{
+	size_t size;
+	int ret;
+	void *reply_buf;
+	void *p;
+	void *end;
+	u64 seq;
+	u32 snap_count;
+	struct ceph_snap_context *snapc;
+	u32 i;
+
+	/*
+	 * We'll need room for the seq value (maximum snapshot id),
+	 * snapshot count, and array of that many snapshot ids.
+	 * For now we have a fixed upper limit on the number we're
+	 * prepared to receive.
+	 */
+	size = sizeof (__le64) + sizeof (__le32) +
+			RBD_MAX_SNAP_COUNT * sizeof (__le64);
+	reply_buf = kzalloc(size, GFP_KERNEL);
+	if (!reply_buf)
+		return -ENOMEM;
+
+	ret = rbd_req_sync_exec(rbd_dev, rbd_dev->header_name,
+				"rbd", "get_snapcontext",
+				NULL, 0,
+				reply_buf, size,
+				CEPH_OSD_FLAG_READ, NULL);
+	if (ret < 0)
+		goto out;
+	dout("  rbd_req_sync_exec(snap_context) -> %d\n", ret);
+
+	ret = -ERANGE;
+	p = reply_buf;
+	end = (char *) reply_buf + size;
+	ceph_decode_64_safe(&p, end, seq, out);
+	ceph_decode_32_safe(&p, end, snap_count, out);
+
+	dout("  snap context: seq = %llu, snap_count = %u\n", seq, snap_count);
+
+	/*
+	 * Make sure the reported number of snapshot ids wouldn't go
+	 * beyond the end of our buffer.  But before checking that,
+	 * make sure the computed size of the snapshot context we
+	 * allocate is representable in a size_t.
+	 */
+	if (snap_count > (SIZE_MAX - sizeof (struct ceph_snap_context))
+				 / sizeof (u64)) {
+		ret = -EINVAL;
+		goto out;
+	}
+	if (!ceph_has_room(&p, end, snap_count * sizeof (__le64)))
+		goto out;
+
+	size = sizeof (struct ceph_snap_context) +
+				snap_count * sizeof (snapc->snaps[0]);
+	snapc = kmalloc(size, GFP_KERNEL);
+	if (!snapc) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	atomic_set(&snapc->nref, 1);
+	snapc->seq = seq;
+	snapc->num_snaps = snap_count;
+	for (i = 0; i < snap_count; i++)
+		snapc->snaps[i] = ceph_decode_64(&p);
+
+	rbd_dev->header.snapc = snapc;
+	rbd_dev->header.total_snaps = snap_count;
+out:
+	kfree(reply_buf);
+
+	return 0;
+}
+
 static int rbd_dev_v2_image_size(struct rbd_device *rbd_dev)
 {
 	return __rbd_dev_v2_snapc_size(rbd_dev, CEPH_NOSNAP,
@@ -2837,7 +2915,14 @@ static int rbd_dev_header_v2_probe(struct rbd_device *rbd_dev)
 	if (ret < 0)
 		goto out_err;
 
+	/* Get the snapshot context */
+
+	ret = rbd_dev_v2_snap_context(rbd_dev);
+	if (ret)
+		goto out_err;
+
 	return 0;
+
 out_err:
 	kfree(rbd_dev->header_name);
 	rbd_dev->header_name = NULL;
