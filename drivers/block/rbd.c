@@ -2825,16 +2825,29 @@ static int rbd_dev_v2_snapc_size(struct rbd_device *rbd_dev, u32 which,
 	return 0;
 }
 
+static int rbd_dev_v2_snapc_features(struct rbd_device *rbd_dev, u32 which,
+		u64 *snap_features)
+{
+	struct ceph_snap_context *snapc = rbd_dev->header.snapc;
+
+	return __rbd_dev_v2_snapc_features(rbd_dev, snapc->snaps[which],
+						snap_features);
+}
+
 static int rbd_dev_v2_snap_info(struct rbd_device *rbd_dev, u32 which)
 {
 	int ret;
 	char *snap_name;
 	u64 snap_size = 0;
+	u64 snap_features = 0;
 
 	snap_name = rbd_dev_v2_snapc_name(rbd_dev, which);
 	if (IS_ERR(snap_name))
 		return PTR_ERR(snap_name);
 	ret = rbd_dev_v2_snapc_size(rbd_dev, which, &snap_size);
+	if (ret < 0)
+		goto out_err;
+	ret = rbd_dev_v2_snapc_features(rbd_dev, which, &snap_features);
 	if (ret < 0)
 		goto out_err;
 
