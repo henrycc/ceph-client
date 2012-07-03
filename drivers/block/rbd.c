@@ -2198,6 +2198,16 @@ static char *rbd_dev_v1_snapc_name(struct rbd_device *rbd_dev, u32 which)
 	return snap_name;
 }
 
+static int rbd_dev_v1_snapc_size(struct rbd_device *rbd_dev, u32 which,
+		u64 *snap_size)
+{
+	BUG_ON(which >= rbd_dev->header.snapc->num_snaps);
+	if (snap_size)
+		*snap_size = rbd_dev->header.snap_sizes[which];
+
+	return 0;
+}
+
 /*
  * Scan the rbd device's current snapshot list and compare it to the
  * newly-received snapshot context.  Remove any existing snapshots
@@ -2222,6 +2232,8 @@ static int __rbd_init_snaps_header(struct rbd_device *rbd_dev)
 		u64 snap_id;
 		struct rbd_snap *snap;
 		char *snap_name;
+		u64 snap_size = 0;
+		int ret;
 
 		snap_id = index < snap_count ? snapc->snaps[index]
 					     : CEPH_NOSNAP;
@@ -2247,15 +2259,17 @@ static int __rbd_init_snaps_header(struct rbd_device *rbd_dev)
 		snap_name = rbd_dev_v1_snapc_name(rbd_dev, index);
 		if (IS_ERR(snap_name))
 			return PTR_ERR(snap_name);
+		ret = rbd_dev_v1_snapc_size(rbd_dev, index, &snap_size);
+		if (ret < 0)
+			return ret;
 
 		if (!snap || (snap_id != CEPH_NOSNAP && snap->id < snap_id)) {
-			struct rbd_image_header	*header = &rbd_dev->header;
 			struct rbd_snap *new_snap;
 
 			/* We haven't seen this snapshot before */
 
 			new_snap = __rbd_add_snap_dev(rbd_dev, snap_name,
-					snap_id, header->snap_sizes[index], 0);
+					snap_id, snap_size, 0);
 			if (IS_ERR(new_snap))
 				return PTR_ERR(new_snap);
 
@@ -2268,7 +2282,7 @@ static int __rbd_init_snaps_header(struct rbd_device *rbd_dev)
 		} else {
 			/* Already have this one */
 
-			BUG_ON(snap->size != rbd_dev->header.snap_sizes[index]);
+			BUG_ON(snap->size != snap_size);
 			BUG_ON(strcmp(snap->name, snap_name));
 
 			/* Done with this list entry; advance */
