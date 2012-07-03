@@ -2484,15 +2484,6 @@ static int rbd_add_parse_args(struct rbd_device *rbd_dev,
 	if (!rbd_dev->image_name)
 		goto out_err;
 
-	/* Create the name of the header object */
-
-	rbd_dev->header_name = kmalloc(rbd_dev->image_name_len
-						+ sizeof (RBD_SUFFIX),
-					GFP_KERNEL);
-	if (!rbd_dev->header_name)
-		goto out_err;
-	sprintf(rbd_dev->header_name, "%s%s", rbd_dev->image_name, RBD_SUFFIX);
-
 	/*
 	 * The snapshot name is optional.  If none is is supplied,
 	 * we use the default value.
@@ -2515,8 +2506,6 @@ static int rbd_add_parse_args(struct rbd_device *rbd_dev,
 	return 0;
 
 out_err:
-	kfree(rbd_dev->header_name);
-	rbd_dev->header_name = NULL;
 	kfree(rbd_dev->image_name);
 	rbd_dev->image_name = NULL;
 	rbd_dev->image_name_len = 0;
@@ -2570,6 +2559,15 @@ static ssize_t rbd_add(struct bus_type *bus,
 		goto err_out_client;
 	rbd_dev->pool_id = rc;
 
+	/* Create the name of the header object */
+
+	rbd_dev->header_name = kmalloc(rbd_dev->image_name_len
+						+ sizeof (RBD_SUFFIX),
+					GFP_KERNEL);
+	if (!rbd_dev->header_name)
+		goto err_out_client;
+	sprintf(rbd_dev->header_name, "%s%s", rbd_dev->image_name, RBD_SUFFIX);
+
 	/* generate unique id: find highest unique id, add one */
 	rbd_id_get(rbd_dev);
 
@@ -2617,9 +2615,9 @@ err_out_id:
 	rbd_id_put(rbd_dev);
 err_out_client:
 	rbd_put_client(rbd_dev);
+	kfree(rbd_dev->header_name);
 err_out_args:
 	kfree(rbd_dev->snap_name);
-	kfree(rbd_dev->header_name);
 	kfree(rbd_dev->image_name);
 	kfree(rbd_dev->pool_name);
 err_out:
