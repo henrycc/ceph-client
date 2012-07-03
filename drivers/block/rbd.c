@@ -1084,8 +1084,8 @@ static int rbd_req_sync_op(struct rbd_device *rbd_dev,
 			   int flags,
 			   struct ceph_osd_req_op *ops,
 			   const char *object_name,
-			   u64 ofs, u64 len,
-			   char *buf,
+			   u64 ofs, u64 inbound_size,
+			   char *inbound,
 			   struct ceph_osd_request **linger_req,
 			   u64 *ver)
 {
@@ -1095,13 +1095,13 @@ static int rbd_req_sync_op(struct rbd_device *rbd_dev,
 
 	BUG_ON(ops == NULL);
 
-	num_pages = calc_pages_for(ofs , len);
+	num_pages = calc_pages_for(ofs, inbound_size);
 	pages = ceph_alloc_page_vector(num_pages, GFP_KERNEL);
 	if (IS_ERR(pages))
 		return PTR_ERR(pages);
 
 	ret = rbd_do_request(NULL, rbd_dev, snapc, snapid,
-			  object_name, ofs, len, NULL,
+			  object_name, ofs, inbound_size, NULL,
 			  pages, num_pages,
 			  flags,
 			  ops,
@@ -1111,8 +1111,8 @@ static int rbd_req_sync_op(struct rbd_device *rbd_dev,
 	if (ret < 0)
 		goto done;
 
-	if ((flags & CEPH_OSD_FLAG_READ) && buf)
-		ret = ceph_copy_from_page_vector(pages, buf, ofs, ret);
+	if ((flags & CEPH_OSD_FLAG_READ) && inbound)
+		ret = ceph_copy_from_page_vector(pages, inbound, ofs, ret);
 
 done:
 	ceph_release_page_vector(pages, num_pages);
@@ -1431,6 +1431,8 @@ static int rbd_req_sync_exec(struct rbd_device *rbd_dev,
 			     const char *method_name,
 			     const char *outbound,
 			     size_t outbound_size,
+			     char *inbound,
+			     size_t inbound_size,
 			     int flags,
 			     u64 *ver)
 {
@@ -1464,7 +1466,8 @@ static int rbd_req_sync_exec(struct rbd_device *rbd_dev,
 	ret = rbd_req_sync_op(rbd_dev, NULL,
 			       CEPH_NOSNAP,
 			       flags, ops,
-			       object_name, 0, 0, NULL, NULL, ver);
+			       object_name, 0, inbound_size, inbound,
+			       NULL, ver);
 
 	rbd_destroy_ops(ops);
 
@@ -1776,7 +1779,7 @@ static int rbd_header_add_snap(struct rbd_device *rbd_dev,
 
 	ret = rbd_req_sync_exec(rbd_dev, rbd_dev->header_name,
 				"rbd", "snap_add",
-				data, (size_t) (p - data),
+				data, (size_t) (p - data), NULL, 0,
 				CEPH_OSD_FLAG_WRITE | CEPH_OSD_FLAG_ONDISK,
 				NULL);
 
