@@ -2735,6 +2735,28 @@ static int __rbd_dev_v2_snapc_size(struct rbd_device *rbd_dev, u64 snap_id,
 	return 0;
 }
 
+static int __rbd_dev_v2_snapc_features(struct rbd_device *rbd_dev, u64 snap_id,
+		u64 *snap_features)
+{
+	__le64 snapid = cpu_to_le64(snap_id);
+	__le64 features = 0;
+	int ret;
+
+	ret = rbd_req_sync_exec(rbd_dev, rbd_dev->header_name,
+				"rbd", "get_features",
+				(char *) &snapid, sizeof (snapid),
+				(char *) &features, sizeof (features),
+				CEPH_OSD_FLAG_READ, NULL);
+	if (ret < 0)
+		return ret;
+	*snap_features = le64_to_cpu(features);
+
+	dout("  rbd_req_sync_exec(features[%lluu]) -> %d\n",
+				(unsigned long long) snap_id, ret);
+
+	return 0;
+}
+
 static int rbd_dev_v2_image_size(struct rbd_device *rbd_dev)
 {
 	return __rbd_dev_v2_snapc_size(rbd_dev, CEPH_NOSNAP,
@@ -2777,6 +2799,12 @@ out:
 	return ret;
 }
 
+static int rbd_dev_v2_features(struct rbd_device *rbd_dev)
+{
+	return __rbd_dev_v2_snapc_features(rbd_dev, CEPH_NOSNAP,
+						&rbd_dev->header.features);
+}
+
 static int rbd_dev_header_v2_probe(struct rbd_device *rbd_dev)
 {
 	size_t size;
@@ -2800,6 +2828,12 @@ static int rbd_dev_header_v2_probe(struct rbd_device *rbd_dev)
 	/* Get the object prefix (a.k.a. block_name) for the image */
 
 	ret = rbd_dev_v2_object_prefix(rbd_dev);
+	if (ret < 0)
+		goto out_err;
+
+	/* Get the features for the image */
+
+	ret = rbd_dev_v2_features(rbd_dev);
 	if (ret < 0)
 		goto out_err;
 
