@@ -2806,15 +2806,43 @@ out:
 	return ERR_PTR(ret);
 }
 
+static int rbd_dev_v2_snapc_size(struct rbd_device *rbd_dev, u32 which,
+		u64 *snap_size)
+{
+	struct ceph_snap_context *snapc;
+	__le64 snap_id;
+	u8 order;
+	int ret;
+
+	snapc = rbd_dev->header.snapc;
+	snap_id = cpu_to_le64(snapc->snaps[which]);
+	ret = __rbd_dev_v2_snapc_size(rbd_dev, CEPH_NOSNAP, &order, snap_size);
+	if (ret < 0)
+		return ret;
+	dout("  rbd_req_sync_exec(size[%u]) -> %d\n",
+				(unsigned int) which, ret);
+
+	return 0;
+}
+
 static int rbd_dev_v2_snap_info(struct rbd_device *rbd_dev, u32 which)
 {
+	int ret;
 	char *snap_name;
+	u64 snap_size = 0;
 
 	snap_name = rbd_dev_v2_snapc_name(rbd_dev, which);
 	if (IS_ERR(snap_name))
 		return PTR_ERR(snap_name);
+	ret = rbd_dev_v2_snapc_size(rbd_dev, which, &snap_size);
+	if (ret < 0)
+		goto out_err;
 
 	return 0;
+out_err:
+	kfree(snap_name);
+
+	return ret;
 }
 
 static int rbd_dev_v2_snap_context(struct rbd_device *rbd_dev)
