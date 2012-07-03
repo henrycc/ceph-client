@@ -2858,7 +2858,7 @@ out_err:
 	return ret;
 }
 
-static int rbd_dev_v2_snap_context(struct rbd_device *rbd_dev)
+static int rbd_dev_v2_snap_context(struct rbd_device *rbd_dev, u64 *hver)
 {
 	size_t size;
 	int ret;
@@ -2886,7 +2886,7 @@ static int rbd_dev_v2_snap_context(struct rbd_device *rbd_dev)
 				"rbd", "get_snapcontext",
 				NULL, 0,
 				reply_buf, size,
-				CEPH_OSD_FLAG_READ, NULL);
+				CEPH_OSD_FLAG_READ, hver);
 	if (ret < 0)
 		goto out_err;
 	dout("  rbd_req_sync_exec(snap_context) -> %d\n", ret);
@@ -3003,6 +3003,7 @@ static int rbd_dev_header_v2_probe(struct rbd_device *rbd_dev)
 {
 	size_t size;
 	int ret;
+	u64 ver = 0;
 
 	/* Record the header object name for this rbd image. */
 
@@ -3031,11 +3032,15 @@ static int rbd_dev_header_v2_probe(struct rbd_device *rbd_dev)
 	if (ret < 0)
 		goto out_err;
 
-	/* Get the snapshot context */
+	rbd_dev->header.crypt_type = 0;
+	rbd_dev->header.comp_type = 0;
 
-	ret = rbd_dev_v2_snap_context(rbd_dev);
+	/* Get the snapshot context, plus the header version */
+
+	ret = rbd_dev_v2_snap_context(rbd_dev, &ver);
 	if (ret)
 		goto out_err;
+	rbd_dev->header.obj_version = ver;
 
 	return 0;
 
