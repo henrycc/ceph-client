@@ -2185,6 +2185,19 @@ err:
 	return ERR_PTR(ret);
 }
 
+static char *rbd_dev_v1_snapc_name(struct rbd_device *rbd_dev, u32 which)
+{
+	char *snap_name;
+
+	BUG_ON(which >= rbd_dev->header.snapc->num_snaps);
+	BUG_ON(rbd_dev->header.snap_names_len == 0);
+	snap_name = rbd_dev->header.snap_names;
+	while (which--)
+		snap_name += strlen(snap_name) + 1;
+
+	return snap_name;
+}
+
 /*
  * Scan the rbd device's current snapshot list and compare it to the
  * newly-received snapshot context.  Remove any existing snapshots
@@ -2201,7 +2214,6 @@ static int __rbd_init_snaps_header(struct rbd_device *rbd_dev)
 {
 	struct ceph_snap_context *snapc = rbd_dev->header.snapc;
 	const u32 snap_count = snapc->num_snaps;
-	char *snap_name = rbd_dev->header.snap_names;
 	struct list_head *head = &rbd_dev->snaps;
 	struct list_head *links = head->next;
 	u32 index = 0;
@@ -2209,6 +2221,7 @@ static int __rbd_init_snaps_header(struct rbd_device *rbd_dev)
 	while (index < snap_count || links != head) {
 		u64 snap_id;
 		struct rbd_snap *snap;
+		char *snap_name;
 
 		snap_id = index < snap_count ? snapc->snaps[index]
 					     : CEPH_NOSNAP;
@@ -2230,6 +2243,10 @@ static int __rbd_init_snaps_header(struct rbd_device *rbd_dev)
 			links = next;
 			continue;
 		}
+
+		snap_name = rbd_dev_v1_snapc_name(rbd_dev, index);
+		if (IS_ERR(snap_name))
+			return PTR_ERR(snap_name);
 
 		if (!snap || (snap_id != CEPH_NOSNAP && snap->id < snap_id)) {
 			struct rbd_image_header	*header = &rbd_dev->header;
@@ -2262,7 +2279,6 @@ static int __rbd_init_snaps_header(struct rbd_device *rbd_dev)
 		/* Advance to the next entry in the snapshot context */
 
 		index++;
-		snap_name += strlen(snap_name) + 1;
 	}
 
 	return 0;
