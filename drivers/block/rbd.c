@@ -2661,6 +2661,88 @@ out:
 	return ret;
 }
 
+static int rbd_dev_header_v1_probe(struct rbd_device *rbd_dev)
+{
+	int ret;
+	size_t size;
+
+	/* Version 1 images have no id; empty string is used */
+
+	rbd_dev->image_id = kstrdup("", GFP_KERNEL);
+	if (!rbd_dev->image_id)
+		return -ENOMEM;
+	rbd_dev->image_id_len = 0;
+
+	/* Record the header object name for this rbd image. */
+
+	size = rbd_dev->image_name_len + sizeof (RBD_SUFFIX);
+	rbd_dev->header_name = kmalloc(size, GFP_KERNEL);
+	if (!rbd_dev->header_name) {
+		ret = -ENOMEM;
+		goto out_err;
+	}
+	sprintf(rbd_dev->header_name, "%s%s", rbd_dev->image_name, RBD_SUFFIX);
+
+	/* Populate rbd image metadata */
+
+	ret = rbd_read_header(rbd_dev, &rbd_dev->header);
+	if (ret < 0)
+		goto out_err;
+
+	ret = __rbd_init_snaps_header(rbd_dev);
+	if (ret)
+		goto out_err;
+
+	return 0;
+
+out_err:
+	kfree(rbd_dev->header_name);
+	rbd_dev->header_name = NULL;
+	kfree(rbd_dev->image_id);
+	rbd_dev->image_id = NULL;
+
+	return ret;
+}
+
+static int rbd_dev_header_v2_probe(struct rbd_device *rbd_dev)
+{
+	size_t size;
+
+	/* Record the header object name for this rbd image. */
+
+	size = sizeof (RBD_HEADER_PREFIX) + rbd_dev->image_id_len;
+	rbd_dev->header_name = kmalloc(size, GFP_KERNEL);
+	if (!rbd_dev->header_name)
+		return -ENOMEM;
+	sprintf(rbd_dev->header_name, "%s%s",
+			RBD_HEADER_PREFIX, rbd_dev->image_id);
+
+	return 0;
+}
+
+/*
+ * Probe for the existence of the header object for the given rbd
+ * device.  For format 2 images this includes determining the image
+ * id.
+ */
+static int rbd_dev_header_probe(struct rbd_device *rbd_dev)
+{
+	int ret;
+
+	/*
+	 * Get the id from the image id object.  If it's not a
+	 * format 2 image, we'll get ENOENT back, and we'll assume
+	 * it's a format 1 image.
+	 */
+	ret = rbd_dev_image_id(rbd_dev);
+	if (ret == -ENOENT)
+		return rbd_dev_header_v1_probe(rbd_dev);
+	else if (!ret)
+		return rbd_dev_header_v2_probe(rbd_dev);
+
+	return ret;
+}
+
 static ssize_t rbd_add(struct bus_type *bus,
 		       const char *buf,
 		       size_t count)
@@ -2706,39 +2788,12 @@ static ssize_t rbd_add(struct bus_type *bus,
 		goto err_out_client;
 	rbd_dev->pool_id = rc;
 
-	rc = rbd_dev_image_id(rbd_dev);
-	if (rc == -ENOENT) {
-		/* Version 1 images have no id; empty string is used */
-		rbd_dev->image_id = kstrdup("", GFP_KERNEL);
-		if (!rbd_dev->image_id) {
-			rc = -ENOMEM;
-			goto err_out_client;
-		}
-		rbd_dev->image_id_len = 0;
-	} else {
-	        /* Not actually supporting format 2 yet */
-		goto err_out_client;
-	}
-
-	/* Create the name of the header object */
-
-	rbd_dev->header_name = kmalloc(rbd_dev->image_name_len
-						+ sizeof (RBD_SUFFIX),
-					GFP_KERNEL);
-	if (!rbd_dev->header_name)
-		goto err_out_client;
-	sprintf(rbd_dev->header_name, "%s%s", rbd_dev->image_name, RBD_SUFFIX);
-
-	/* contact OSD, request size info about the object being mapped */
-	rc = rbd_read_header(rbd_dev, &rbd_dev->header);
-	if (rc)
+	/* get information about the image from the header */
+	rc = rbd_dev_header_probe(rbd_dev);
+	if (rc < 0)
 		goto err_out_client;
 
-	/* no need to lock here, as rbd_dev is not registered yet */
-	rc = __rbd_init_snaps_header(rbd_dev);
-	if (rc)
-		goto err_out_client;
-
+	/* set image size, or for snapshot mapping, snapid and size */
 	rc = rbd_header_set_snap(rbd_dev, &disk_size);
 	if (rc)
 		goto err_out_client;
