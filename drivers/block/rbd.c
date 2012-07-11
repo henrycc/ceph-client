@@ -595,31 +595,26 @@ out_err:
 	return -ENOMEM;
 }
 
-static int snap_by_name(struct rbd_image_header *header, const char *snap_name,
-			u64 *seq, u64 *size)
+static int snap_by_name(struct rbd_device *rbd_dev, const char *snap_name,
+			u64 *snap_id, u64 *snap_size)
 {
-	int i;
-	char *p = header->snap_names;
+	struct rbd_snap *snap;
 
-	for (i = 0; i < header->total_snaps; i++) {
-		if (!strcmp(snap_name, p)) {
+	list_for_each_entry(snap, &rbd_dev->snaps, node) {
+		if (!strcmp(snap_name, snap->name)) {
+			*snap_id = snap->id;
+			*snap_size = snap->size;
 
-			/* Found it.  Pass back its id and/or size */
-
-			if (seq)
-				*seq = header->snapc->snaps[i];
-			if (size)
-				*size = header->snap_sizes[i];
-			return i;
+			return 0;
 		}
-		p += strlen(p) + 1;	/* Skip ahead to the next name */
 	}
+
 	return -ENOENT;
 }
 
 static int rbd_header_set_snap(struct rbd_device *rbd_dev, u64 *size)
 {
-	int ret;
+	int ret = 0;
 
 	down_write(&rbd_dev->header_rwsem);
 
@@ -631,9 +626,9 @@ static int rbd_header_set_snap(struct rbd_device *rbd_dev, u64 *size)
 		if (size)
 			*size = rbd_dev->header.image_size;
 	} else {
-		u64 snap_id = 0;
+		u64 snap_id = CEPH_NOSNAP;
 
-		ret = snap_by_name(&rbd_dev->header, rbd_dev->snap_name,
+		ret = snap_by_name(rbd_dev, rbd_dev->snap_name,
 					&snap_id, size);
 		if (ret < 0)
 			goto done;
@@ -641,8 +636,6 @@ static int rbd_header_set_snap(struct rbd_device *rbd_dev, u64 *size)
 		rbd_dev->snap_exists = true;
 		rbd_dev->read_only = true;	/* No choice for snapshots */
 	}
-
-	ret = 0;
 done:
 	up_write(&rbd_dev->header_rwsem);
 	return ret;
