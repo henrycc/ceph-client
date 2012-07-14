@@ -81,13 +81,14 @@
 struct rbd_image_header {
 	u64 image_size;
 	char *object_prefix;
+	u64 features;
 	__u8 obj_order;
 	__u8 crypt_type;
 	__u8 comp_type;
+
+	u32 total_snaps;
 	struct ceph_snap_context *snapc;
 	u64 snap_names_len;
-	u32 total_snaps;
-
 	char *snap_names;
 	u64 *snap_sizes;
 
@@ -144,6 +145,7 @@ struct rbd_snap {
 	u64			size;
 	struct list_head	node;
 	u64			id;
+	u64			features;
 };
 
 /*
@@ -175,6 +177,7 @@ struct rbd_device {
 
 	/* protects updating the header */
 	struct rw_semaphore     header_rwsem;
+	u64                     features;	/* image or mapped snapshot */
 	/* name of the snapshot this device reads from */
 	char                    *snap_name;
 	/* id of the snapshot this device reads from */
@@ -549,6 +552,7 @@ static int rbd_header_from_disk(struct rbd_image_header *header,
 	}
 
 	header->image_size = le64_to_cpu(ondisk->image_size);
+	header->features = 0;	/* No features support in v1 images */
 	header->obj_order = ondisk->options.order;
 	header->crypt_type = ondisk->options.crypt_type;
 	header->comp_type = ondisk->options.comp_type;
@@ -596,7 +600,7 @@ out_err:
 }
 
 static int snap_by_name(struct rbd_device *rbd_dev, const char *snap_name,
-			u64 *snap_id, u64 *snap_size)
+			u64 *snap_id, u64 *snap_size, u64 *snap_features)
 {
 	struct rbd_snap *snap;
 
@@ -604,6 +608,7 @@ static int snap_by_name(struct rbd_device *rbd_dev, const char *snap_name,
 		if (!strcmp(snap_name, snap->name)) {
 			*snap_id = snap->id;
 			*snap_size = snap->size;
+			*snap_features = snap->features;
 
 			return 0;
 		}
@@ -621,18 +626,21 @@ static int rbd_header_set_snap(struct rbd_device *rbd_dev, u64 *size)
 	if (!memcmp(rbd_dev->snap_name, RBD_SNAP_HEAD_NAME,
 		    sizeof (RBD_SNAP_HEAD_NAME))) {
 		rbd_dev->snap_id = CEPH_NOSNAP;
-		rbd_dev->snap_exists = false;
-		rbd_dev->read_only = rbd_dev->rbd_opts.read_only;
 		if (size)
 			*size = rbd_dev->header.image_size;
+		rbd_dev->features = rbd_dev->header.features;
+		rbd_dev->snap_exists = false;
+		rbd_dev->read_only = 0;
 	} else {
 		u64 snap_id = CEPH_NOSNAP;
+		u64 snap_features = 0;
 
 		ret = snap_by_name(rbd_dev, rbd_dev->snap_name,
-					&snap_id, size);
+					&snap_id, size, &snap_features);
 		if (ret < 0)
 			goto done;
 		rbd_dev->snap_id = snap_id;
+		rbd_dev->features = snap_features;
 		rbd_dev->snap_exists = true;
 		rbd_dev->read_only = true;	/* No choice for snapshots */
 	}
@@ -1931,6 +1939,19 @@ static ssize_t rbd_size_show(struct device *dev,
 	return sprintf(buf, "%llu\n", (unsigned long long) size * SECTOR_SIZE);
 }
 
+/*
+ * Note this shows the features for whatever's mapped, which is not
+ * necessarily the base image.
+ */
+static ssize_t rbd_features_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
+{
+	struct rbd_device *rbd_dev = dev_to_rbd_dev(dev);
+
+	return sprintf(buf, "0x%016llx\n",
+			(unsigned long long) rbd_dev->features);
+}
+
 static ssize_t rbd_major_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
@@ -1972,6 +1993,10 @@ static ssize_t rbd_name_show(struct device *dev,
 	return sprintf(buf, "%s\n", rbd_dev->image_name);
 }
 
+/*
+ * Shows the name of the currently-mapped snapshot (or
+ * RBD_SNAP_HEAD_NAME for the base image).
+ */
 static ssize_t rbd_snap_show(struct device *dev,
 			     struct device_attribute *attr,
 			     char *buf)
@@ -1995,6 +2020,7 @@ static ssize_t rbd_image_refresh(struct device *dev,
 }
 
 static DEVICE_ATTR(size, S_IRUGO, rbd_size_show, NULL);
+static DEVICE_ATTR(features, S_IRUGO, rbd_features_show, NULL);
 static DEVICE_ATTR(major, S_IRUGO, rbd_major_show, NULL);
 static DEVICE_ATTR(client_id, S_IRUGO, rbd_client_id_show, NULL);
 static DEVICE_ATTR(pool, S_IRUGO, rbd_pool_show, NULL);
@@ -2006,6 +2032,7 @@ static DEVICE_ATTR(create_snap, S_IWUSR, NULL, rbd_snap_add);
 
 static struct attribute *rbd_attrs[] = {
 	&dev_attr_size.attr,
+	&dev_attr_features.attr,
 	&dev_attr_major.attr,
 	&dev_attr_client_id.attr,
 	&dev_attr_pool.attr,
@@ -2059,12 +2086,24 @@ static ssize_t rbd_snap_id_show(struct device *dev,
 	return sprintf(buf, "%llu\n", (unsigned long long)snap->id);
 }
 
+static ssize_t rbd_snap_features_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct rbd_snap *snap = container_of(dev, struct rbd_snap, dev);
+
+	return sprintf(buf, "0x%016llx\n",
+			(unsigned long long) snap->features);
+}
+
 static DEVICE_ATTR(snap_size, S_IRUGO, rbd_snap_size_show, NULL);
 static DEVICE_ATTR(snap_id, S_IRUGO, rbd_snap_id_show, NULL);
+static DEVICE_ATTR(snap_features, S_IRUGO, rbd_snap_features_show, NULL);
 
 static struct attribute *rbd_snap_attrs[] = {
 	&dev_attr_snap_size.attr,
 	&dev_attr_snap_id.attr,
+	&dev_attr_snap_features.attr,
 	NULL,
 };
 
@@ -2112,7 +2151,8 @@ static int rbd_register_snap_dev(struct rbd_snap *snap,
 
 static struct rbd_snap *__rbd_add_snap_dev(struct rbd_device *rbd_dev,
 						const char *snap_name,
-						u64 snap_id, u64 snap_size)
+						u64 snap_id, u64 snap_size,
+						u64 snap_features)
 {
 	struct rbd_snap *snap;
 	int ret;
@@ -2128,6 +2168,7 @@ static struct rbd_snap *__rbd_add_snap_dev(struct rbd_device *rbd_dev,
 
 	snap->id = snap_id;
 	snap->size = snap_size;
+	snap->features = snap_features;
 
 	if (device_is_registered(&rbd_dev->dev)) {
 		ret = rbd_register_snap_dev(snap, &rbd_dev->dev);
@@ -2197,7 +2238,7 @@ static int __rbd_init_snaps_header(struct rbd_device *rbd_dev)
 			/* We haven't seen this snapshot before */
 
 			new_snap = __rbd_add_snap_dev(rbd_dev, snap_name,
-					snap_id, header->snap_sizes[index]);
+					snap_id, header->snap_sizes[index], 0);
 			if (IS_ERR(new_snap))
 				return PTR_ERR(new_snap);
 
