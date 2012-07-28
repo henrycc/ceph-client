@@ -615,7 +615,8 @@ static void osd_reset(struct ceph_connection *con)
 
 	if (!osd)
 		return;
-	dout("osd_reset osd%d\n", osd->o_osd);
+	printk("osd_reset osd%d\n", osd->o_osd);
+	BUG_ON(atomic_read(&osd->o_ref) < 1);
 	osdc = osd->o_osdc;
 	down_read(&osdc->map_sem);
 	kick_osd_requests(osdc, osd);
@@ -634,6 +635,7 @@ static struct ceph_osd *create_osd(struct ceph_osd_client *osdc, int onum)
 	if (!osd)
 		return NULL;
 
+	printk("create_osd %p\n", osd);
 	atomic_set(&osd->o_ref, 1);
 	osd->o_osdc = osdc;
 	osd->o_osd = onum;
@@ -655,7 +657,7 @@ static struct ceph_osd *get_osd(struct ceph_osd *osd)
 		     atomic_read(&osd->o_ref));
 		return osd;
 	} else {
-		dout("get_osd %p FAIL\n", osd);
+		printk("get_osd %p FAIL\n", osd);
 		return NULL;
 	}
 }
@@ -667,6 +669,7 @@ static void put_osd(struct ceph_osd *osd)
 	if (atomic_dec_and_test(&osd->o_ref) && osd->o_auth.authorizer) {
 		struct ceph_auth_client *ac = osd->o_osdc->client->monc.auth;
 
+		printk("put_osd %p destroying\n", osd);
 		if (ac->ops && ac->ops->destroy_authorizer)
 			ac->ops->destroy_authorizer(ac, osd->o_auth.authorizer);
 		kfree(osd);
