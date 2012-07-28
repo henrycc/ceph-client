@@ -1140,7 +1140,6 @@ static void prepare_read_tag(struct ceph_connection *con)
  */
 static int prepare_read_message(struct ceph_connection *con)
 {
-	printk("prepare_read_message %p\n", con);
 	BUG_ON(con->in_msg != NULL);
 	con->in_base_pos = 0;
 	con->in_front_crc = con->in_middle_crc = con->in_data_crc = 0;
@@ -1807,8 +1806,6 @@ static int read_partial_message(struct ceph_connection *con)
 	u64 seq;
 	u32 crc;
 
-	printk("read_partial_message con %p msg %p\n", con, m);
-
 	/* header */
 	size = sizeof (con->in_hdr);
 	end = size;
@@ -1885,9 +1882,9 @@ static int read_partial_message(struct ceph_connection *con)
 			con->in_msg_pos.page_pos = 0;
 		con->in_msg_pos.data_pos = 0;
 
-		printk("alloc %p front %p~%d front_len %d\n", m,
+		printk("alloc %p front %p~%d front_len %d sock %p\n", m,
 		       m->front.iov_base,
-		       (int)m->front.iov_len, front_len);
+		       (int)m->front.iov_len, front_len, con->sock);
 
 #ifdef CONFIG_BLOCK
 		if (m->bio)
