@@ -392,6 +392,7 @@ static int ceph_tcp_connect(struct ceph_connection *con)
 
 		return ret;
 	}
+	printk("connect %p sock %p\n", con, sock);
 	con->sock = sock;
 	return 0;
 }
@@ -450,7 +451,7 @@ static int con_close_socket(struct ceph_connection *con)
 {
 	int rc;
 
-	dout("con_close_socket on %p sock %p\n", con, con->sock);
+	printk("con_close_socket on %p sock %p\n", con, con->sock);
 	if (!con->sock)
 		return 0;
 	rc = con->sock->ops->shutdown(con->sock, SHUT_RDWR);
@@ -1705,7 +1706,8 @@ static int read_partial_message_section(struct ceph_connection *con,
 	int ret, left;
 
 	BUG_ON(!section);
-
+	printk("con %p msg %p kvec %p~%d len %d sock %p\n", con, con->in_msg,
+	       section->iov_base, (int)section->iov_len, sec_len, con->sock);
 	while (section->iov_len < sec_len) {
 		BUG_ON(section->iov_base == NULL);
 		left = sec_len - section->iov_len;
@@ -1805,7 +1807,7 @@ static int read_partial_message(struct ceph_connection *con)
 	u64 seq;
 	u32 crc;
 
-	dout("read_partial_message con %p msg %p\n", con, m);
+	printk("read_partial_message con %p msg %p\n", con, m);
 
 	/* header */
 	size = sizeof (con->in_hdr);
@@ -1853,7 +1855,7 @@ static int read_partial_message(struct ceph_connection *con)
 	/* allocate message? */
 	if (!con->in_msg) {
 		dout("got hdr type %d front %d data %d\n", con->in_hdr.type,
-		     con->in_hdr.front_len, con->in_hdr.data_len);
+		     front_len, data_len);
 		if (ceph_con_in_msg_alloc(con, &con->in_hdr)) {
 			/* skip this message */
 			dout("alloc_msg said skip message\n");
@@ -1882,6 +1884,10 @@ static int read_partial_message(struct ceph_connection *con)
 		else
 			con->in_msg_pos.page_pos = 0;
 		con->in_msg_pos.data_pos = 0;
+
+		printk("alloc %p front %p~%d front_len %d\n", m,
+		       m->front.iov_base,
+		       (int)m->front.iov_len, front_len);
 
 #ifdef CONFIG_BLOCK
 		if (m->bio)
