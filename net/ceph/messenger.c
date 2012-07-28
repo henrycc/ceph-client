@@ -521,7 +521,7 @@ static void reset_connection(struct ceph_connection *con)
 void ceph_con_close(struct ceph_connection *con)
 {
 	mutex_lock(&con->mutex);
-	dout("con_close %p peer %s\n", con,
+	printk("con_close %p peer %s\n", con,
 	     ceph_pr_addr(&con->peer_addr.in_addr));
 	con->state = CON_STATE_CLOSED;
 
@@ -547,7 +547,7 @@ void ceph_con_open(struct ceph_connection *con,
 		   struct ceph_entity_addr *addr)
 {
 	mutex_lock(&con->mutex);
-	dout("con_open %p %s\n", con, ceph_pr_addr(&addr->in_addr));
+	printk("con_open %p %s\n", con, ceph_pr_addr(&addr->in_addr));
 
 	BUG_ON(con->state != CON_STATE_CLOSED);
 	con->state = CON_STATE_PREOPEN;
@@ -1139,7 +1139,7 @@ static void prepare_read_tag(struct ceph_connection *con)
  */
 static int prepare_read_message(struct ceph_connection *con)
 {
-	dout("prepare_read_message %p\n", con);
+	printk("prepare_read_message %p\n", con);
 	BUG_ON(con->in_msg != NULL);
 	con->in_base_pos = 0;
 	con->in_front_crc = con->in_middle_crc = con->in_data_crc = 0;
@@ -2511,7 +2511,7 @@ void ceph_msg_revoke(struct ceph_msg *msg)
 
 	mutex_lock(&con->mutex);
 	if (!list_empty(&msg->list_head)) {
-		dout("%s %p msg %p - was on queue\n", __func__, con, msg);
+		printk("%s %p msg %p - was on queue\n", __func__, con, msg);
 		list_del_init(&msg->list_head);
 		BUG_ON(msg->con == NULL);
 		msg->con->ops->put(msg->con);
@@ -2521,7 +2521,7 @@ void ceph_msg_revoke(struct ceph_msg *msg)
 		ceph_msg_put(msg);
 	}
 	if (con->out_msg == msg) {
-		dout("%s %p msg %p - was sending\n", __func__, con, msg);
+		printk("%s %p msg %p - was sending\n", __func__, con, msg);
 		con->out_msg = NULL;
 		if (con->out_kvec_is_msg) {
 			con->out_skip = con->out_kvec_bytes;
@@ -2543,7 +2543,7 @@ void ceph_msg_revoke_incoming(struct ceph_msg *msg)
 
 	BUG_ON(msg == NULL);
 	if (!msg->con) {
-		dout("%s msg %p null con\n", __func__, msg);
+		printk("%s msg %p null con\n", __func__, msg);
 
 		return;		/* Message not in our possession */
 	}
@@ -2556,7 +2556,7 @@ void ceph_msg_revoke_incoming(struct ceph_msg *msg)
 		unsigned int data_len = le32_to_cpu(con->in_hdr.data_len);
 
 		/* skip rest of message */
-		dout("%s %p msg %p revoked\n", __func__, con, msg);
+		printk("%s %p msg %p revoked\n", __func__, con, msg);
 		con->in_base_pos = con->in_base_pos -
 				sizeof(struct ceph_msg_header) -
 				front_len -
@@ -2568,7 +2568,7 @@ void ceph_msg_revoke_incoming(struct ceph_msg *msg)
 		con->in_tag = CEPH_MSGR_TAG_READY;
 		con->in_seq++;
 	} else {
-		dout("%s %p in_msg %p msg %p no-op\n",
+		printk("%s %p in_msg %p msg %p no-op\n",
 		     __func__, con, con->in_msg, msg);
 	}
 	mutex_unlock(&con->mutex);
