@@ -1861,9 +1861,11 @@ static int read_partial_message(struct ceph_connection *con)
 				sizeof(m->footer);
 			con->in_tag = CEPH_MSGR_TAG_READY;
 			con->in_seq++;
+			printk("%p skip\n", con);
 			return 0;
 		}
 		if (!con->in_msg) {
+			printk("%p enomem\n", con);
 			con->error_msg =
 				"error allocating memory for incoming message";
 			return -ENOMEM;
@@ -1882,7 +1884,7 @@ static int read_partial_message(struct ceph_connection *con)
 			con->in_msg_pos.page_pos = 0;
 		con->in_msg_pos.data_pos = 0;
 
-		printk("alloc %p front %p~%d front_len %d sock %p\n", m,
+		printk("%p alloc %p front %p~%d front_len %d sock %p\n", con, m,
 		       m->front.iov_base,
 		       (int)m->front.iov_len, front_len, con->sock);
 
@@ -2739,6 +2741,7 @@ static bool ceph_con_in_msg_alloc(struct ceph_connection *con,
 			return skip != 0;
 	}
 	if (!con->in_msg) {
+		printk("%p manual alloc\n", con);
 		con->in_msg = ceph_msg_new(type, front_len, GFP_NOFS, false);
 		if (!con->in_msg) {
 			pr_err("unable to allocate msg type %d len %d\n",
