@@ -811,8 +811,9 @@ static size_t print_time(u64 ts, char *buf)
 		return 15;
 
 	rem_nsec = do_div(ts, 1000000000);
-	return sprintf(buf, "[%5lu.%06lu] ",
-		       (unsigned long)ts, rem_nsec / 1000);
+	return sprintf(buf, "[%5lu.%06lu %6u] ",
+		       (unsigned long)ts, rem_nsec / 1000,
+		       (unsigned)current->pid);
 }
 
 static size_t print_prefix(const struct log *msg, bool syslog, char *buf)
